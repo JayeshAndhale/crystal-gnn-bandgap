@@ -17,13 +17,13 @@ from torch_geometric.loader import DataLoader
 
 from crystal_gnn.models.cgcnn import CGCNN
 
-GRAPHS_DIR = Path("data/processed/graphs")
+#GRAPHS_DIR = Path("data/processed/graphs")
 CHECKPOINT_DIR = Path("checkpoints")
 SEED = 42
 
 
-def load_all_graphs():
-    files = sorted(GRAPHS_DIR.glob("*.pt"))
+def load_all_graphs(graphs_dir):
+    files = sorted(Path(graphs_dir).glob("*.pt"))
     return [torch.load(f, weights_only=False) for f in files]
 
 
@@ -85,6 +85,7 @@ def run_epoch(model, loader, stats, optimizer=None, device="cpu"):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--graphs_dir", type=str, default="data/processed/graphs")
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -94,7 +95,7 @@ def main():
     print(f"Device: {device}")
 
     print("Loading graphs...")
-    graphs = load_all_graphs()
+    graphs = load_all_graphs(args.graphs_dir)
     train_graphs, val_graphs, test_graphs = split_graphs(graphs)
     print(f"Split: {len(train_graphs)} train / {len(val_graphs)} val / {len(test_graphs)} test")
 
