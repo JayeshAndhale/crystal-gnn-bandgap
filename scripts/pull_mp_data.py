@@ -28,6 +28,7 @@ def fetch_candidate_pool():
     with MPRester(api_key) as mpr:
         docs = mpr.materials.summary.search(
             energy_above_hull=STABILITY_CUTOFF,
+            nelements=(2, None),  #excludes elemental phases (trivial bonding, ~0 formation energy)
             fields=[
                 "material_id",
                 "formula_pretty",
