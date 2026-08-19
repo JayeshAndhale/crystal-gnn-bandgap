@@ -1,4 +1,5 @@
 mp-api
 pymatgen
 python-dotenv
-pandas
+pandastorch
+torch_geometric
