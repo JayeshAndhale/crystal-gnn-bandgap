@@ -1,0 +1,4 @@
+mp-api
+pymatgen
+python-dotenv
+pandas
