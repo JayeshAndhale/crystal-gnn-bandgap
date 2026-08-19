@@ -1,6 +1,8 @@
 pyproject.toml
+src/crystal_gnn/__init__.py
 src/crystal_gnn.egg-info/PKG-INFO
 src/crystal_gnn.egg-info/SOURCES.txt
 src/crystal_gnn.egg-info/dependency_links.txt
 src/crystal_gnn.egg-info/top_level.txt
-src/crystal_gnn/models/cgnn.py
+src/crystal_gnn/models/__init__.py
+src/crystal_gnn/models/cgcnn.py
