@@ -14,7 +14,7 @@ from mp_api.client import MPRester
 
 # --- config -----------------------------------------------------------
 STABILITY_CUTOFF = (0, 0.05)   # energy_above_hull range in eV/atom
-SAMPLE_SIZE = 5000
+SAMPLE_SIZE = 25000
 RANDOM_SEED = 42                # fixed seed = reproducible sample, defensible in interviews
 OUTPUT_PATH = Path("data/raw/candidate_pool.json")
 
