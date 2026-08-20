@@ -106,7 +106,10 @@ def main():
     val_loader = DataLoader(val_graphs, batch_size=args.batch_size, shuffle=False)
 
     model = CGCNN().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, mode="min", factor=0.5, patience=8
+)
 
     CHECKPOINT_DIR.mkdir(exist_ok=True)
     best_val_loss = float("inf")
@@ -115,7 +118,10 @@ def main():
         train_loss = run_epoch(model, train_loader, stats, optimizer, device)
         val_loss = run_epoch(model, val_loader, stats, optimizer=None, device=device)
 
-        print(f"Epoch {epoch}/{args.epochs} | train loss: {train_loss:.4f} | val loss: {val_loss:.4f}")
+        scheduler.step(val_loss)
+        current_lr = optimizer.param_groups[0]["lr"]
+
+        print(f"Epoch {epoch}/{args.epochs} | train loss: {train_loss:.4f} | val loss: {val_loss:.4f} | lr: {current_lr:.2e}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
