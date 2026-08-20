@@ -15,8 +15,6 @@ import torch
 from monty.json import MontyDecoder
 from torch_geometric.data import Data
 
-STRUCTURES_PATH = Path("data/raw/structures.jsonl")
-OUTPUT_DIR = Path("data/processed/graphs_alignn")
 
 CUTOFF_RADIUS = 8.0
 MAX_NEIGHBORS = 12
@@ -109,12 +107,16 @@ def structure_to_alignn_graph(structure, band_gap: float, formation_energy: floa
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--structures_path", type=str, default="data/raw/structures.jsonl")
+    parser.add_argument("--output_dir", type=str, default="data/processed/graphs_alignn")
     parser.add_argument("--limit", type=int, default=None, help="Max structures to process (for testing/subsetting)")
+
     args = parser.parse_args()
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    with open(STRUCTURES_PATH) as f:
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    with open(args.structures_path) as f:
         lines = f.readlines()
 
     if args.limit:
@@ -126,7 +128,7 @@ def main():
     for line in lines:
         record = json.loads(line, cls=MontyDecoder)
         material_id = record["material_id"]
-        out_path = OUTPUT_DIR / f"{material_id}.pt"
+        out_path = output_dir / f"{material_id}.pt"
 
         if out_path.exists():
             skipped += 1
