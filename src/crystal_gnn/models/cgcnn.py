@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import MessagePassing, global_mean_pool
 
-MAX_ATOMIC_NUMBER = 100  # covers all naturally occurring elements
-
 
 class CGCNNConv(MessagePassing):
     """One convolution layer: gated message passing over bonds."""
@@ -37,7 +35,7 @@ class CGCNNConv(MessagePassing):
 class CGCNN(nn.Module):
     def __init__(self, atom_dim=64, edge_dim=41, num_conv_layers=3, hidden_dim=128):
         super().__init__()
-        self.embedding = nn.Embedding(MAX_ATOMIC_NUMBER + 1, atom_dim)
+        self.embedding = nn.Linear(92, atom_dim)
         self.conv_layers = nn.ModuleList(
             [CGCNNConv(atom_dim, edge_dim) for _ in range(num_conv_layers)]
         )

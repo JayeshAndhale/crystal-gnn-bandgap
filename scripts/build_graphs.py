@@ -11,6 +11,10 @@ import torch
 from monty.json import MontyDecoder
 from torch_geometric.data import Data
 
+ATOM_INIT_PATH = Path(__file__).parent.parent / "src" / "crystal_gnn" / "models" / "atom_init.json"
+with open(ATOM_INIT_PATH) as f:
+    ATOM_FEATURES = {int(k): v for k, v in json.load(f).items()}
+
 STRUCTURES_PATH = Path("data/raw/structures.jsonl")
 OUTPUT_DIR = Path("data/processed/graphs")
 
@@ -28,7 +32,8 @@ def gaussian_expand(distances: torch.Tensor) -> torch.Tensor:
 
 
 def structure_to_graph(structure, band_gap: float, formation_energy: float) -> Data:
-    atomic_numbers = torch.tensor([site.specie.Z for site in structure], dtype=torch.long)
+    
+    node_features = torch.tensor([ATOM_FEATURES[site.specie.Z] for site in structure], dtype=torch.float)
 
     all_neighbors = structure.get_all_neighbors(CUTOFF_RADIUS)  # handles periodic images
 
@@ -44,7 +49,7 @@ def structure_to_graph(structure, band_gap: float, formation_energy: float) -> D
     edge_attr = gaussian_expand(torch.tensor(edge_dist, dtype=torch.float))
 
     return Data(
-        x=atomic_numbers,
+        x=node_features,
         edge_index=edge_index,
         edge_attr=edge_attr,
         y_band_gap=torch.tensor([band_gap], dtype=torch.float),
