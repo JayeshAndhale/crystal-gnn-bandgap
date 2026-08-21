@@ -107,6 +107,7 @@ def structure_to_alignn_graph(structure, band_gap: float, formation_energy: floa
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--start", type=int, default=0, help="Line offset to start from")
     parser.add_argument("--structures_path", type=str, default="data/raw/structures.jsonl")
     parser.add_argument("--output_dir", type=str, default="data/processed/graphs_alignn")
     parser.add_argument("--limit", type=int, default=None, help="Max structures to process (for testing/subsetting)")
@@ -119,8 +120,8 @@ def main():
     with open(args.structures_path) as f:
         lines = f.readlines()
 
-    if args.limit:
-        lines = lines[:args.limit]
+    end = args.start + args.limit if args.limit else None
+    lines = lines[args.start:end]
 
     print(f"Total structures to process: {len(lines)}")
 
