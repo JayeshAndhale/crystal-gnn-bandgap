@@ -23,8 +23,13 @@ SEED = 42
 
 
 def load_all_graphs(graphs_dir):
-    files = sorted(Path(graphs_dir).glob("*.pt"))
-    return [torch.load(f, weights_only=False) for f in files]
+    """graphs_dir may be a single path or multiple paths, comma-separated
+    (needed since the 25k ALIGNN set is split across several Kaggle
+    Datasets — /kaggle/tmp doesn't persist reliably at that scale)."""
+    all_files = []
+    for d in str(graphs_dir).split(","):
+        all_files.extend(sorted(Path(d.strip()).glob("*.pt")))
+    return [torch.load(f, weights_only=False) for f in all_files]
 
 
 def split_graphs(graphs, train_frac=0.8, val_frac=0.1):
