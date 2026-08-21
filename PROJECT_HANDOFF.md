@@ -272,6 +272,92 @@ python scripts/train_alignn.py
 
 ---
 
+## Tier 3.1: Interpretability — COMPLETE
+
+### Method
+`scripts/interpret_cgcnn.py` — no retraining. Registers a forward hook on
+each `CGCNNConv.gate_net` (the `nn.Linear` whose sigmoid output is the
+per-bond gate in `CGCNNConv.message`), runs `cgcnn_best.pt` forward on 8
+materials sampled from the held-out test split (`SAMPLE_SEED=123`, disjoint
+from the training/eval split logic), and reduces each bond's 64-dim gate
+vector to a scalar (mean over channels) per layer. Bond identity (element
+pair, real distance) is recovered by re-running the exact neighbor-finding
+logic from `build_graphs.py` on the raw structure (not by inverting the
+Gaussian-expanded `edge_attr`, which isn't invertible) — asserted to produce
+the same edge count as the stored graph, so gate values line up with the
+right bonds.
+
+### Findings (`results/interpretability/`)
+- **Gate strength vs. bond distance:** Pearson r = -0.379 (p ≈ 1.2e-93,
+  n=2724 bonds across 8 materials) — shorter bonds get stronger gates.
+- **Hetero- vs. homo-nuclear bonds:** mean gate 0.449 (hetero, n=1391) vs.
+  0.417 (homo, n=1333); Welch's t-test p ≈ 1.0e-37. The model gates real
+  cation-anion/covalent bonding interactions higher than same-element
+  contacts — a chemically sensible signal, not noise.
+- Per-material breakdown (`top_bonds_per_material.png`) shows real structure,
+  not just distance-sorting: e.g. mp-6342 (LiCa₃RuO₆) has O–Ru @ 1.98Å as
+  its clearly highest-gated bond type, well above the Ca–Ca/Ca–Li contacts.
+
+---
+
+## Tier 3.2: Ensemble Uncertainty Quantification — COMPLETE
+
+### Method
+`scripts/train_ensemble.py` / `scripts/evaluate_ensemble.py` — a 5-member
+CGCNN deep ensemble, one fixed train/val/test split shared by every member
+(`SPLIT_SEED=42`, identical to the baseline), only differing by
+`torch.manual_seed(member_seed)` for model init + minibatch shuffling
+(seeds 1–5, deliberately distinct from `SPLIT_SEED` to avoid confusing the
+two). Trained on Kaggle T4 GPU, 100 epochs each, same optimizer/scheduler
+as the baseline. Evaluation computes ensemble-mean predictions (average
+over members) and ensemble std (spread across members, the uncertainty
+estimate), then checks calibration: does higher spread actually predict
+higher error (spread-skill plots + Pearson correlation), not just whether
+the mean prediction improved.
+
+### Results (`results/uncertainty_cgcnn/`, full 25,125-material split:
+20,100/2,512/2,513)
+
+| | Mean single-member MAE | Ensemble-mean MAE |
+|---|---|---|
+| Formation energy | 0.0685 eV/atom | **0.0509 eV/atom** |
+| Band gap | 0.3861 eV | **0.3558 eV** |
+
+Ensembling alone closed more of the formation-energy gap to the published
+CGCNN benchmark (~0.039) than either the scheduler fix or switching to
+ALIGNN did — FE MAE dropped from ~1.6x published (single CGCNN) to ~1.3x
+published, with zero architecture changes. Ensemble-mean band gap MAE
+(0.3558) is now marginally *better* than the single ALIGNN run (0.3572).
+
+**Calibration — a genuinely mixed, honest result:**
+- **Formation energy** is well-calibrated in magnitude, not just direction:
+  corr(predicted std, actual |error|) = 0.228 (p ≈ 5.6e-31); miscalibration
+  ratio (mean|error| / mean std) = 0.946, close to the ~0.80 ideal for
+  Gaussian residuals. The spread-skill plot tracks close to y=x.
+- **Band gap** has a *stronger* correlation (r = 0.490, p ≈ 7.0e-152— the
+  ensemble is better at ranking *which* materials it'll get wrong) but is
+  substantially **underconfident in magnitude**: miscalibration ratio 2.063
+  — actual error is on average 2x the predicted std. The spread-skill plot
+  sits well below y=x across the entire range, not just at outliers.
+- Interview framing: the ensemble's disagreement is real signal for both
+  targets (it knows *which* materials are harder), but only formation
+  energy's spread is trustworthy as a *magnitude* estimate of "how wrong" —
+  band gap uncertainty would need recalibration (e.g. temperature scaling)
+  before using it for anything like active learning acquisition, which
+  matters directly for Tier 3.3 if pursued.
+
+### Checkpoints
+`checkpoints/ensemble_cgcnn/member_seed{1..5}_best.pt` — not committed to
+git (gitignored), kept locally, downloaded from the Kaggle Dataset
+`jayeshandhale/crystal-gnn-ensemble-cgcnn` (private). To reproduce:
+```
+python scripts/train_ensemble.py --model cgcnn \
+  --graphs_dir <graphs_newfeatures_dir> --epochs 100 --seeds 1,2,3,4,5
+python scripts/evaluate_ensemble.py --model cgcnn --graphs_dir <same dir>
+```
+
+---
+
 ## Infrastructure lessons (apply going forward, not just retrospective)
 1. **Verify every "should be committed" change with `git log origin/main -1
    --oneline` before trusting a Kaggle session to have it.** Multiple times
@@ -295,6 +381,32 @@ python scripts/train_alignn.py
    creating any zip, model checkpoint, or other large output — this is what
    would have caught the `data/` tracking bug immediately instead of
    accumulating 600MB across many commits.
+6. **Lesson 1 recurred exactly as described, concretely this time:** the
+   Tier 3.1/3.2 commit was made locally but not pushed before starting a
+   Kaggle session that `git clone`s from GitHub — the clone silently
+   succeeded but was simply missing `train_ensemble.py`, producing a
+   confusing "No such file" error with no hint that the real problem was an
+   unpushed commit. Checking `git log origin/main -1` first would have
+   caught it in seconds instead of a failed run.
+7. **Don't assume a Kaggle-mounted dataset's folder layout matches what's
+   documented here — verify it live.** By the time of the ensemble run, the
+   `crystal-gnn-graphs` dataset's `graphs_newfeatures` folder (documented
+   above as the correct, complete 25,125-file format) actually only had
+   5,000 files, while an undocumented `graphs_scaled` folder had the full
+   25,125 — evidently a later re-upload that was never written back into
+   this file. Confirmed correct via a quick empirical check (load one graph
+   from each candidate folder, verify `x.shape == (n, 92)` with the expected
+   `atom_init.json`-style categorical-block encoding) rather than trusting
+   folder names or this document's history.
+8. **In the Kaggle notebook editor, click/type only after confirming a
+   blinking text cursor is visible in the cell** — a single click just
+   *selects* a cell (command mode); typing there is read as a stream of
+   Jupyter keyboard shortcuts (`a`/`b`/`c`/`d`/`x`/etc. all do things),
+   which silently created several stray empty cells before this was caught.
+   Also: Kaggle's "Save Version" can throw a `ConcurrencyViolation` /
+   sequence-number error if more than one browser tab/session has the same
+   notebook's draft open — close any other open tab on the same notebook
+   before committing.
 
 ---
 
@@ -307,18 +419,23 @@ python scripts/train_alignn.py
   than further optimizer tuning (diminishing returns already observed).
 - Git history was rewritten (`filter-repo`) mid-project — old commit hashes
   before that point are no longer valid if ever sharing/collaborating.
-- Not yet done: multi-task-vs-separate-model ablation write-up, uncertainty
-  quantification tier, active learning tier, interpretability
-  (atom-contribution decomposition) tier — all still on the original project
-  plan, not started.
+- Not yet done: multi-task-vs-separate-model ablation write-up, active
+  learning tier, ALIGNN interpretability/UQ (Tiers 3.1/3.2 above only cover
+  CGCNN so far), public README + CV bullets (Tier 3.5, deliberately deferred
+  until final scope is locked).
 
 ## Next candidate directions
-- Interpretability pass on both models (atom-contribution decomposition —
-  CGCNN supports this natively; worth comparing against ALIGNN's line-graph
-  attention/gates).
-- Uncertainty quantification (deep ensembles) — cheap to add given both
-  training scripts already share structure.
+- Active learning simulation (Tier 3.3) — now unblocked by Tier 3.2's
+  ensemble, but band gap's uncertainty is underconfident in magnitude
+  (miscalibration ratio 2.06) even though it ranks materials correctly by
+  difficulty; an acquisition function that only needs *relative* ranking
+  (e.g. pick top-k highest-std materials) should still work, but anything
+  relying on the absolute uncertainty value would need recalibration first.
+- Repeat Tier 3.1/3.2 for ALIGNN, for a full architecture-vs-architecture
+  comparison on interpretability and calibration, not just point-prediction
+  MAE.
 - Scale to the remaining ~50k available materials if pursuing the
-  formation-energy gap further.
+  formation-energy gap further — worth revisiting given how much the FE gap
+  closed from ensembling alone (1.6x → 1.3x published) with zero new data.
 
 
