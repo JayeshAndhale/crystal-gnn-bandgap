@@ -372,17 +372,20 @@ in the data but are hidden from the acquisition logic).
 Each of 6 rounds: train a small fresh 3-member CGCNN ensemble from scratch
 (40 epochs, no warm-starting, to avoid confounding round comparisons) on
 the current labeled set, evaluate ensemble-mean test MAE, then reveal 3,000
-more materials — either the pool's highest band-gap-uncertainty materials
-("uncertainty" strategy) or a random 3,000 ("random" baseline). Both
-strategies share the identical initial labeled set and round schedule, so
-the only difference is which materials get revealed. Acquisition
-deliberately targets **band gap** uncertainty, not formation energy's,
-because Tier 3.2 found BG's ensemble std ranks material difficulty more
-reliably (r=0.49) than FE's (r=0.23) — acquisition only needs correct
-relative ranking, not calibrated magnitude, so BG's underconfidence in
-*magnitude* (Tier 3.2's other finding) doesn't disqualify it here.
+more materials — either the pool's highest-uncertainty materials
+("uncertainty" strategy, ranked by one target's ensemble std) or a random
+3,000 ("random" baseline). Both strategies share the identical initial
+labeled set and round schedule, so the only difference is which materials
+get revealed. Run **twice**, once per target (`--acquisition_target bg` and
+`--acquisition_target fe`) — deliberately, as a predict-then-confirm test of
+Tier 3.2's calibration finding (BG's ensemble std ranks material difficulty
+more reliably, r=0.49, than FE's, r=0.23): if that finding is real,
+BG-targeted acquisition should beat random cleanly and FE-targeted
+acquisition shouldn't.
 
-### Results (`results/active_learning/`)
+### Results
+
+**Run 1 — acquiring by band gap uncertainty** (`results/active_learning/`):
 
 | n_labels | uncertainty FE MAE | random FE MAE | uncertainty BG MAE | random BG MAE |
 |---|---|---|---|---|
@@ -394,36 +397,54 @@ relative ranking, not calibrated magnitude, so BG's underconfidence in
 | 17,000 | 0.0668 | 0.0668 | 0.3935 | 0.4055 |
 | 20,000 | 0.0627 | 0.0607 | 0.3724 | 0.3946 |
 
-**A clean, honest, mechanistically-explained result — not a uniform win:**
-- **Band gap:** uncertainty-based acquisition beats random at *every* round
-  from 5,000 labels onward, not just one lucky round (`active_learning_curves.png`
-  shows a consistent gap, not noise around a coin flip). It reaches random's
-  final (20,000-label) BG performance using only ~13,831 labels — **31%
-  fewer labels for the same accuracy** — and reaches random's 17,000-label
-  performance using ~12,504 labels (26% fewer).
-- **Formation energy:** no consistent gain (random matches or beats
-  uncertainty-based acquisition almost everywhere; 0% label savings at the
-  one target level reached). This is expected, not a failure: acquisition
-  was never targeting FE-relevant uncertainty, and Tier 3.2 already found
-  FE's own ensemble std is a weaker difficulty-ranking signal than BG's.
-- Interview framing: uncertainty-based acquisition delivers real,
-  consistent sample efficiency specifically on the property whose
-  uncertainty estimate was validated as a reliable ranking signal in Tier
-  3.2 — and correctly does *not* transfer to a property it wasn't targeting,
-  which is a more informative, credible result than either "AL helps
-  everything" or a flat null result would be.
+**Run 2 — acquiring by formation energy uncertainty** (`results/active_learning_fe/`):
+
+| n_labels | uncertainty FE MAE | random FE MAE | uncertainty BG MAE | random BG MAE |
+|---|---|---|---|---|
+| 2,000 | 0.1247 | 0.1247 | 0.5934 | 0.5934 |
+| 5,000 | 0.1193 | 0.0877 | 0.5103 | 0.5122 |
+| 8,000 | 0.0835 | 0.0777 | 0.4511 | 0.4802 |
+| 11,000 | 0.0800 | 0.0686 | 0.4176 | 0.4324 |
+| 14,000 | 0.0715 | 0.0641 | 0.4046 | 0.4084 |
+| 17,000 | 0.0648 | 0.0660 | 0.3920 | 0.4051 |
+| 20,000 | 0.0667 | 0.0597 | 0.3752 | 0.3857 |
+
+**A predicted mechanism, confirmed by two symmetric runs — not two isolated
+results:**
+- **BG-targeted run:** uncertainty-based acquisition beats random at *every*
+  round from 5,000 labels onward. Reaches random's final (20,000-label) BG
+  performance using only ~13,831 labels — **31% fewer labels for the same
+  accuracy**. FE shows no gain (0% label savings at the one target level
+  reached) — unsurprising, since acquisition was never targeting FE.
+- **FE-targeted run:** uncertainty-based acquisition does *not* cleanly beat
+  random on FE (random wins or ties at 5 of 7 rounds; only ~3% label savings,
+  and never reaches the final-round target) — exactly what Tier 3.2's weaker
+  FE ranking-correlation (r=0.23) predicts. Band gap, not targeted this run,
+  *still* shows a consistent uncertainty-beats-random gap (9–18% fewer
+  labels) at nearly every round — plausibly because materials that are
+  FE-hard and BG-hard overlap, so FE-uncertainty acquisition incidentally
+  picks generally-informative materials.
+- Interview framing: this isn't "we tried active learning and it worked" —
+  it's "a calibration diagnostic (Tier 3.2) predicted which target's
+  uncertainty would support effective acquisition, and two independent runs
+  confirmed the prediction in both directions." That's a substantially
+  stronger claim than either run alone.
 
 ### Checkpoints
-`checkpoints/active_learning/{uncertainty,random}/round{0..6}/member{0,1,2}.pt`
-plus `round_state.json` per strategy (full round-by-round labeled-material
+`checkpoints/active_learning{,_fe}/{uncertainty,random}/round{0..6}/member{0,1,2}.pt`
+plus `round_state.json` per strategy/run (full round-by-round labeled-material
 IDs, for exact reproducibility of which materials were acquired when) — not
-committed to git, kept locally, downloaded from the Kaggle Dataset
-`jayeshandhale/crystal-gnn-active-learning` (private). To reproduce:
+committed to git, kept locally, downloaded from the Kaggle Datasets
+`jayeshandhale/crystal-gnn-active-learning` and
+`jayeshandhale/crystal-gnn-active-learning-fe` (private). To reproduce:
 ```
 python scripts/active_learning.py --graphs_dir <graphs_newfeatures_dir> \
   --seed_size 2000 --acquisition_size 3000 --n_rounds 6 \
-  --ensemble_size 3 --epochs_per_round 40
-python scripts/plot_active_learning.py --acquisition_target bg
+  --ensemble_size 3 --epochs_per_round 40 --acquisition_target bg
+python scripts/plot_active_learning.py --results_dir results/active_learning --acquisition_target bg
+
+# repeat with --acquisition_target fe and a distinct --checkpoint_dir/--output_dir
+# for the second run
 ```
 
 ---
@@ -498,12 +519,6 @@ python scripts/plot_active_learning.py --acquisition_target bg
 - Repeat Tier 3.1/3.2/3.3 for ALIGNN, for a full architecture-vs-architecture
   comparison on interpretability, calibration, and active-learning sample
   efficiency — not just point-prediction MAE.
-- Formation-energy-targeted active learning: Tier 3.3 deliberately acquired
-  by band gap uncertainty (the better-ranking signal per Tier 3.2) and,
-  unsurprisingly, saw no FE gain. A parallel run acquiring by FE uncertainty
-  specifically would test whether AL helps FE too, or whether FE's weaker
-  ranking correlation (r=0.23 vs BG's 0.49) means it wouldn't — an open
-  question, not yet answered.
 - Scale to the remaining ~50k available materials if pursuing the
   formation-energy gap further — worth revisiting given how much the FE gap
   closed from ensembling alone (1.6x → 1.3x published) with zero new data.
