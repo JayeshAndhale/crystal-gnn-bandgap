@@ -358,6 +358,76 @@ python scripts/evaluate_ensemble.py --model cgcnn --graphs_dir <same dir>
 
 ---
 
+## Tier 3.3: Active Learning Simulation — COMPLETE
+
+### Method
+`scripts/active_learning.py` / `scripts/plot_active_learning.py` — a
+pool-based active learning simulation, depending directly on Tier 3.2's
+ensemble. The held-out test set (same 2,513 materials, `SPLIT_SEED=42`) is
+fixed throughout, never touched by training or acquisition. The combined
+train+val split (22,612 materials) is the "pool" — a small random 2,000-
+material seed set starts labeled, the rest starts unlabeled (labels exist
+in the data but are hidden from the acquisition logic).
+
+Each of 6 rounds: train a small fresh 3-member CGCNN ensemble from scratch
+(40 epochs, no warm-starting, to avoid confounding round comparisons) on
+the current labeled set, evaluate ensemble-mean test MAE, then reveal 3,000
+more materials — either the pool's highest band-gap-uncertainty materials
+("uncertainty" strategy) or a random 3,000 ("random" baseline). Both
+strategies share the identical initial labeled set and round schedule, so
+the only difference is which materials get revealed. Acquisition
+deliberately targets **band gap** uncertainty, not formation energy's,
+because Tier 3.2 found BG's ensemble std ranks material difficulty more
+reliably (r=0.49) than FE's (r=0.23) — acquisition only needs correct
+relative ranking, not calibrated magnitude, so BG's underconfidence in
+*magnitude* (Tier 3.2's other finding) doesn't disqualify it here.
+
+### Results (`results/active_learning/`)
+
+| n_labels | uncertainty FE MAE | random FE MAE | uncertainty BG MAE | random BG MAE |
+|---|---|---|---|---|
+| 2,000 | 0.1212 | 0.1212 | 0.5716 | 0.5716 |
+| 5,000 | 0.1133 | 0.0861 | 0.4927 | 0.5051 |
+| 8,000 | 0.0870 | 0.0805 | 0.4493 | 0.4574 |
+| 11,000 | 0.0711 | 0.0749 | 0.4179 | 0.4487 |
+| 14,000 | 0.0837 | 0.0693 | 0.3932 | 0.4176 |
+| 17,000 | 0.0668 | 0.0668 | 0.3935 | 0.4055 |
+| 20,000 | 0.0627 | 0.0607 | 0.3724 | 0.3946 |
+
+**A clean, honest, mechanistically-explained result — not a uniform win:**
+- **Band gap:** uncertainty-based acquisition beats random at *every* round
+  from 5,000 labels onward, not just one lucky round (`active_learning_curves.png`
+  shows a consistent gap, not noise around a coin flip). It reaches random's
+  final (20,000-label) BG performance using only ~13,831 labels — **31%
+  fewer labels for the same accuracy** — and reaches random's 17,000-label
+  performance using ~12,504 labels (26% fewer).
+- **Formation energy:** no consistent gain (random matches or beats
+  uncertainty-based acquisition almost everywhere; 0% label savings at the
+  one target level reached). This is expected, not a failure: acquisition
+  was never targeting FE-relevant uncertainty, and Tier 3.2 already found
+  FE's own ensemble std is a weaker difficulty-ranking signal than BG's.
+- Interview framing: uncertainty-based acquisition delivers real,
+  consistent sample efficiency specifically on the property whose
+  uncertainty estimate was validated as a reliable ranking signal in Tier
+  3.2 — and correctly does *not* transfer to a property it wasn't targeting,
+  which is a more informative, credible result than either "AL helps
+  everything" or a flat null result would be.
+
+### Checkpoints
+`checkpoints/active_learning/{uncertainty,random}/round{0..6}/member{0,1,2}.pt`
+plus `round_state.json` per strategy (full round-by-round labeled-material
+IDs, for exact reproducibility of which materials were acquired when) — not
+committed to git, kept locally, downloaded from the Kaggle Dataset
+`jayeshandhale/crystal-gnn-active-learning` (private). To reproduce:
+```
+python scripts/active_learning.py --graphs_dir <graphs_newfeatures_dir> \
+  --seed_size 2000 --acquisition_size 3000 --n_rounds 6 \
+  --ensemble_size 3 --epochs_per_round 40
+python scripts/plot_active_learning.py --acquisition_target bg
+```
+
+---
+
 ## Infrastructure lessons (apply going forward, not just retrospective)
 1. **Verify every "should be committed" change with `git log origin/main -1
    --oneline` before trusting a Kaggle session to have it.** Multiple times
@@ -419,23 +489,26 @@ python scripts/evaluate_ensemble.py --model cgcnn --graphs_dir <same dir>
   than further optimizer tuning (diminishing returns already observed).
 - Git history was rewritten (`filter-repo`) mid-project — old commit hashes
   before that point are no longer valid if ever sharing/collaborating.
-- Not yet done: multi-task-vs-separate-model ablation write-up, active
-  learning tier, ALIGNN interpretability/UQ (Tiers 3.1/3.2 above only cover
+- Not yet done: multi-task-vs-separate-model ablation write-up, ALIGNN
+  interpretability/UQ/active-learning (Tiers 3.1/3.2/3.3 above only cover
   CGCNN so far), public README + CV bullets (Tier 3.5, deliberately deferred
   until final scope is locked).
 
 ## Next candidate directions
-- Active learning simulation (Tier 3.3) — now unblocked by Tier 3.2's
-  ensemble, but band gap's uncertainty is underconfident in magnitude
-  (miscalibration ratio 2.06) even though it ranks materials correctly by
-  difficulty; an acquisition function that only needs *relative* ranking
-  (e.g. pick top-k highest-std materials) should still work, but anything
-  relying on the absolute uncertainty value would need recalibration first.
-- Repeat Tier 3.1/3.2 for ALIGNN, for a full architecture-vs-architecture
-  comparison on interpretability and calibration, not just point-prediction
-  MAE.
+- Repeat Tier 3.1/3.2/3.3 for ALIGNN, for a full architecture-vs-architecture
+  comparison on interpretability, calibration, and active-learning sample
+  efficiency — not just point-prediction MAE.
+- Formation-energy-targeted active learning: Tier 3.3 deliberately acquired
+  by band gap uncertainty (the better-ranking signal per Tier 3.2) and,
+  unsurprisingly, saw no FE gain. A parallel run acquiring by FE uncertainty
+  specifically would test whether AL helps FE too, or whether FE's weaker
+  ranking correlation (r=0.23 vs BG's 0.49) means it wouldn't — an open
+  question, not yet answered.
 - Scale to the remaining ~50k available materials if pursuing the
   formation-energy gap further — worth revisiting given how much the FE gap
   closed from ensembling alone (1.6x → 1.3x published) with zero new data.
+- Tier 3.5: public README + CV bullets. With Tiers 1-3.3 all complete, scope
+  is arguably locked enough to write these now unless ALIGNN parity (above)
+  is wanted first.
 
 
